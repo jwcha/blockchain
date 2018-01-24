@@ -1,0 +1,7 @@
+# git's hit list #                                                    2018.01.24
+##################
+
+# virtualenv stuff
+bin/*
+lib/*
+include/*
