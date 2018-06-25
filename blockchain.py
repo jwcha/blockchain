@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """
- blockchain.py                                                        2018.01.24
+blockchain.py                                                        2018.01.24
  The best way to learn about blockchains is to make one.
  python3.6, virtualenv + virtualenvwrapper, Flask==0.12.2 requests==2.18.4
 """
@@ -14,7 +14,7 @@ class Blockchain(object):
     def __init__(self):
         self.chain = []
         self.current_transactions = []
-        
+
         # Create the genesis block (root block)
         self.new_block(previous_hash=1, proof=100)
 
@@ -74,3 +74,54 @@ class Blockchain(object):
     def last_block(self):
         # Returns the last Block in the chain.
         return self.chain[-1]
+
+    """
+    Understanding Proof of Work
+    ---------------------------
+    A Proof of Work(PoW) algorithm is how new Blocks are created (or mined) on
+    the blockchain. The goal of PoW is to discover a number which solves a
+    problem. The number must be *difficult*to*find*but*easy*to*verify* --
+    computationally speaking -- by anyone on the network. This is the core idea
+    behind Proof of Work.
+
+    The rule implemented below for our PoW algorithm is as follows:
+
+        Find a number p such that when hashed with the previous block's
+        solutions a hash with four leading zeroes is produced.
+
+    An easy way to adjust the difficulty of the algorithm is to modify the
+    number of leading zeroes needed. For our simple example, four is enough;
+    even adding a single zero to the rule increases the time needed by an
+    exponential amount.
+
+    In Bitcoin, the PoW algorithm is called Hashcash, and it isn't too
+    different from the rule implemented below.
+    """
+    def proof_of_work(self, last_proof):
+        """
+        Simple Proof of Work Algorithm:
+            - Find a number p' such that hash(pp') contains 4 leading zeroes,
+              where p is the previous p'.
+            - p is the previous proof, and p' is the new proof.
+
+        :param last_proof: <int> the previous Proof
+        :return: <int> the new Proof
+        """
+        proof = 0
+        while self.valid_proof(last_proof, proof) is False:
+            proof += 1
+        return proof
+
+    @staticmethod
+    def valid_proof(last_proof, proof):
+        """
+        Validates the Proof: Does hash(last_proof, proof) contain four leading
+        zeroes?
+
+        :param last_proof: <int> Previous Proof
+        :param proof: <int> Current Proof
+        :return: <bool> True if correct, False otherwise
+        """
+        guess = f'{last_proof}{proof}'.encode()
+        guess_hash = hashlib.sha256(guess).hexdigest()
+        return guess_hash[:4] == "0000"
