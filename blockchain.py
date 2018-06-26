@@ -11,6 +11,7 @@ from textwrap import dedent
 from time import time
 from uuid import uuid4
 from flask import Flask, jsonify, request
+from urllib.parse import urlparse
 
 
 class Blockchain(object):
@@ -19,6 +20,7 @@ class Blockchain(object):
     def __init__(self):
         self.chain = []
         self.current_transactions = []
+        self.nodes = set()
 
         # Create the genesis block (root block)
         self.new_block(previous_hash=1, proof=100)
@@ -195,6 +197,39 @@ class Blockchain(object):
                 'length': len(blockchain.chain),
                 }
         return jsonify(response), 200
+
+    """
+    Consensus
+    ---------
+    It's all very well if we have a blockchain for ourselves, but the whole
+    point of blockchains is that they're decentralized, meaning there is more
+    than one node in the network. But if we have multiple nodes in the network,
+    how do we ensure that everyone has the same chain? (or know whose chain is
+    the authorotative one?
+
+    This is where Consensus comes in. Our consensus algorithm will allow us to
+    resolve any conflicts that occur. However, in order to even have any
+    conflicts there must be a way to discover new nodes in our network and
+    register them to keep track of them.
+    """
+
+    """
+    Registering New Nodes
+    ---------------------
+    Each Node should keep a registry of neighbouring Nodes in our network.
+    Thus the following endpoints are needed:
+        /nodes/register : this will accept a list of new Nodes as URLs
+        /nodes/resolve  : will be the Consensus algorithm, to resolve conflicts
+    """
+    def register_node(self, address):
+        """
+        Add a new Node to the list of Nodes.
+
+        :param address: <str> Address of Node. e.g. 'http://192.168.0.5:5000'
+        :return: None
+        """
+        parsed_url = urlparse(address)
+        self.nodes.add(parsed_url.netloc)
 
     if __name__ == '__main__':
         app.run(host='0.0.0.0', port=5000)
