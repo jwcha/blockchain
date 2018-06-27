@@ -177,7 +177,7 @@ class Blockchain(object):
         return jsonify(response)
 
     @app.route('/transactions/new', methods=['POST'])
-    def new_transaction():
+    def new_transaction_flask():
         values = request.get_json()
         # check that the required fields are in the POST'd data
         required = ['sender', 'recipient', 'amount']
@@ -200,18 +200,86 @@ class Blockchain(object):
 
     """
     Consensus
-    ---------
-    It's all very well if we have a blockchain for ourselves, but the whole
+    =========
+        It's all very well if we have a blockchain for ourselves, but the whole
     point of blockchains is that they're decentralized, meaning there is more
     than one node in the network. But if we have multiple nodes in the network,
     how do we ensure that everyone has the same chain? (or know whose chain is
-    the authorotative one?
+    the authoritative one?
 
-    This is where Consensus comes in. Our consensus algorithm will allow us to
-    resolve any conflicts that occur. However, in order to even have any
+        This is where Consensus comes in. Our consensus algorithm will allow us
+    to resolve any conflicts that occur. However, in order to even have any
     conflicts there must be a way to discover new nodes in our network and
     register them to keep track of them.
+
+        In our simple example here, an easy to understand (and more
+    importantly, easy to implement,) rule should be utilized and such an
+    algorithm can be described as follows: "The longest, valid chain is
+    authoritative." id est, the longest chain on the network is the de-facto
+    chain.
+
+        First, in order to use our Consensus algorithm to resolve conflicts in
+    the network, we must implement a method for validating a given chain. The
+    mehtod valid_chain() takes a Blockchain as an argument and returns a
+    boolean value to signify if the argument chain is a valid one or not.
+        Specifically, it sets up the process by initializing 'last_block' to
+    the genesis (or root) block in the chain and sets 'block' to the second
+    block in the chain. For each block in the chain, valid_chain() checks to
+    see if the previous hash of the current block is equal to the self.hash()
+    function with the previous block as an argument; if they are equal, update
+    'last_block' to the current block and increment the counter.
     """
+    def valid_chain(self, chain):
+        """
+        Determine if a given Blockchain is valid.
+
+        :param chain: <list> A blockchain
+        :return: <bool> True if valid, False otherwise.
+        """
+        last_block = chain[0]
+        current_index += 1
+        while current_index < len(chain):
+            block = chain[current_index]
+            print(f"{last_block}")
+            print(f"{block}")
+            print("\n=-~-=-~-=-~-=-~-=-~-=-~-=-~-=\n")
+            # Check that the hash of the block is correct
+            if block['previous_hash'] != self.hash(last_block):
+                return False
+            # Check that the Proof of Work is correct
+            if not self.valid_proof(last_block['proof'], block['proof']):
+                return False
+            last_block = block
+            current_index += 1
+        return True
+
+    def resolve_conflicts(self):
+        """
+        This is our Consensus algorithm described above. It resolves conflicts
+        by replacing our chain with the longest one in the network.
+
+        :return: <bool> True if our chain was replaced, false otherwise
+        """
+        neighbours = self.nodes
+        new_chain = None
+        # We're only looking for chains longer than ours
+        max_length = len(self.chain)
+        # Grab and verify the chains from all the nodes in our network
+        for node in neigbours:
+            response = requests.get(f"http://{node}/chain")
+            if response.status_code == 200:
+                length = response.json()['length']
+                chain = response.json()['chain']
+                # Check if the length is longer and the chain is valid
+                if length > max_length and self.valid_chain(chain):
+                    max_length = length
+                    new_chain = chain
+        # Replace our chain if we discovered a new, valid chain longer than
+        # ours.
+        if new_chain:
+            self.chain = new_chain
+            return True
+        return False
 
     """
     Registering New Nodes
