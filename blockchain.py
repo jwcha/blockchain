@@ -7,6 +7,7 @@ blockchain.py                                                        2018.01.24
 # imports
 import hashlib
 import json
+import requests
 from textwrap import dedent
 from time import time
 from uuid import uuid4
@@ -14,7 +15,11 @@ from flask import Flask, jsonify, request
 from urllib.parse import urlparse
 
 
+# =======================
+# START: BLOCKCHAIN CLASS
+# =======================
 class Blockchain(object):
+
     # Constructor for the Blockchain class -- this will be used to instantiate
     # a Blockchain.
     def __init__(self):
@@ -24,15 +29,6 @@ class Blockchain(object):
 
         # Create the genesis block (root block)
         self.new_block(previous_hash=1, proof=100)
-
-    # Instantiate our Node
-    app = Flask(__name__)
-
-    # Generate a globally unique address for this Node
-    node_identifier = str(uuid4()).replace('-', '')
-
-    # Instantiate the Blockchain
-    blockchain = Blockchain()
 
     def new_block(self, proof, previous_hash=None):
         # Creates a new Block and adds it to the chain.
@@ -237,7 +233,7 @@ class Blockchain(object):
         :return: <bool> True if valid, False otherwise.
         """
         last_block = chain[0]
-        current_index += 1
+        current_index = 1
         while current_index < len(chain):
             block = chain[current_index]
             print(f"{last_block}")
@@ -258,6 +254,11 @@ class Blockchain(object):
         This is our Consensus algorithm described above. It resolves conflicts
         by replacing our chain with the longest one in the network.
 
+        The method resolve_conflicts() loops through all our neighbouring
+        nodes, downloads their chains and verifies them using the valid_chain()
+        method above. If a valid chain is found, whose length is greater than
+        ours, we replace ours.
+
         :return: <bool> True if our chain was replaced, false otherwise
         """
         neighbours = self.nodes
@@ -265,7 +266,7 @@ class Blockchain(object):
         # We're only looking for chains longer than ours
         max_length = len(self.chain)
         # Grab and verify the chains from all the nodes in our network
-        for node in neigbours:
+        for node in neighbours:
             response = requests.get(f"http://{node}/chain")
             if response.status_code == 200:
                 length = response.json()['length']
@@ -285,6 +286,7 @@ class Blockchain(object):
     Registering New Nodes
     ---------------------
     Each Node should keep a registry of neighbouring Nodes in our network.
+
     Thus the following endpoints are needed:
         /nodes/register : this will accept a list of new Nodes as URLs
         /nodes/resolve  : will be the Consensus algorithm, to resolve conflicts
@@ -299,5 +301,51 @@ class Blockchain(object):
         parsed_url = urlparse(address)
         self.nodes.add(parsed_url.netloc)
 
-    if __name__ == '__main__':
-        app.run(host='0.0.0.0', port=5000)
+    """
+    The Flask API endpoint to register new nodes. After successfully receiving
+    a list of nodes via POST, this method will use the 'register_node()' method
+    in this class to add each node received to the list of neighboring nodes in
+    the network.
+    """
+    @app.route('/nodes/register', methods=['POST'])
+    def register_nodes():
+        values = request.get_json()
+        nodes = values.get('nodes')
+        if nodes is None:
+            return "Error: Please supply a valid list of nodes.", 400
+        for node in nodes:
+            blockchain.register_node(node)
+        response = {
+                'message': 'New nodes have been added',
+                'total_nodes': list(blockchain.nodes),
+                }
+        return jsonify(response), 201
+
+    """
+    Consensus Endpoint
+    ------------------
+    This is the Flask API endpoint that will be used to call
+      resolve_conflicts() which will run our Consensus algorithm.
+    """
+    @app.route('/nodes/resolve', methods=['GET'])
+    def consensus():
+        pass
+
+
+# =====================
+# END: BLOCKCHAIN CLASS
+# =====================
+
+
+# Instantiate our Node
+app = Flask(__name__)
+
+# Generate a globally unique address for this Node
+node_identifier = str(uuid4()).replace('-', '')
+
+# Instantiate the Blockchain
+blockchain = Blockchain()
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
