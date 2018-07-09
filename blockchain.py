@@ -8,7 +8,6 @@ blockchain.py                                                        2018.01.24
 import hashlib
 import json
 import requests
-from textwrap import dedent
 from time import time
 from uuid import uuid4
 from flask import Flask, jsonify, request
@@ -18,7 +17,7 @@ from urllib.parse import urlparse
 # =======================
 # START: BLOCKCHAIN CLASS
 # =======================
-class Blockchain(object):
+class Blockchain:
     """
     Constructor for the Blockchain class -- this will be used to instantiate
     a Blockchain.
@@ -89,6 +88,11 @@ class Blockchain(object):
     @property
     def last_block(self):
         # Returns the last Block in the chain.
+        """
+        Returns the last block in the Blockchain
+
+        :return: <dict> The last block on the chain
+        """
         return self.chain[-1]
 
     """
@@ -113,32 +117,35 @@ class Blockchain(object):
     In Bitcoin, the PoW algorithm is called Hashcash, and it isn't too
     different from the rule implemented below.
     """
-    def proof_of_work(self, last_proof):
+    def proof_of_work(self, last_block):
         """
         Simple Proof of Work Algorithm:
             - Find a number p' such that hash(pp') contains 4 leading zeroes,
               where p is the previous p'.
             - p is the previous proof, and p' is the new proof.
 
-        :param last_proof: <int> the previous Proof
+        :param last_block: <dict> the last Block in the chain
         :return: <int> the new Proof
         """
+        last_proof = last_block['proof']
+        last_hash = self.hash(last_block)
         proof = 0
-        while self.valid_proof(last_proof, proof) is False:
+        while self.valid_proof(last_proof, proof, last_hash) is False:
             proof += 1
         return proof
 
     @staticmethod
-    def valid_proof(last_proof, proof):
+    def valid_proof(last_proof, proof, last_hash):
         """
         Validates the Proof: Does hash(last_proof, proof) contain four leading
         zeroes?
 
         :param last_proof: <int> Previous Proof
         :param proof: <int> Current Proof
+        :param last_hash: <str> The hash of the previous Block
         :return: <bool> True if correct, False otherwise
         """
-        guess = f'{last_proof}{proof}'.encode()
+        guess = f'{last_proof}{proof}{last_hash}'.encode()
         guess_hash = hashlib.sha256(guess).hexdigest()
         return guess_hash[:4] == "0000"
 
@@ -188,10 +195,11 @@ class Blockchain(object):
             print(f"{block}")
             print("\n=-~-=-~-=-~-=-~-=-~-=-~-=-~-=\n")
             # Check that the hash of the block is correct
-            if block['previous_hash'] != self.hash(last_block):
+            last_block_hash = self.hash(last_block)
+            if block['previous_hash'] != last_block_hash:
                 return False
             # Check that the Proof of Work is correct
-            if not self.valid_proof(last_block['proof'], block['proof']):
+            if not self.valid_proof(last_block['proof'], block['proof'], last_block_hash):
                 return False
             last_block = block
             current_index += 1
@@ -251,7 +259,13 @@ class Blockchain(object):
         :return: None
         """
         parsed_url = urlparse(address)
-        self.nodes.add(parsed_url.netloc)
+        if parsed_url.netloc:
+            self.nodes.add(parsed_url.netloc)
+        elif parsed_url.path:
+            # Accepts a URL without scheme like '192.168.0.1:5000'
+            self.nodes.add(parsed_url.path)
+        else:
+            raise ValueError('Invalid URL')
 
 
 # =====================
@@ -267,6 +281,81 @@ node_identifier = str(uuid4()).replace('-', '')
 
 # Instantiate the Blockchain
 blockchain = Blockchain()
+
+
+@app.route('/mine', methods=['GET'])
+def mine():
+    """
+    The Mining Endpoint
+    -------------------
+    This is where the 'magic' happens. The 'magic' can be broken down into
+    three things:
+        1. Calculate the Proof of Work.
+        2. Reward the miner(us) by adding a transaction granting us one coin.
+        3. Forge the new Block by adding it to the chain.
+
+    :param: None
+    :return: None
+    """
+    # We run the Proof of Work algorithm to get the next proof.
+    last_block = blockchain.last_block
+    # last_proof = last_block['proof']
+    proof = blockchain.proof_of_work(last_block)
+    # We must receive a reward for finding the proof.
+    # The sender is "0" to signify that this node has mined a new coin.
+    blockchain.new_transaction(
+            sender="0",
+            recipient=node_identifier,
+            amount=1,
+            )
+    # Forge the new Block by adding it to the chain.
+    previous_hash = blockchain.hash(last_block)
+    block = blockchain.new_block(proof, previous_hash)
+    response = {
+            'message': "New Block Forged.",
+            'index': block['index'],
+            'transactions': block['transactions'],
+            'proof': block['proof'],
+            'previous_hash': block['previous_hash'],
+            }
+    return jsonify(response), 200
+
+
+@app.route('/transactions/new', methods=['POST'])
+def new_transaction_flask():
+    """
+    Flask endpoint over the network for submitting a new transaction to
+    the blockchain.
+
+    :param: None
+    :return: None
+    """
+    values = request.get_json()
+    # check that the required fields are in the POST'd data
+    required = ['sender', 'recipient', 'amount']
+    if not all(k in values for k in required):
+        return 'Missing values', 400
+    # create a new transaction
+    index = blockchain.new_transaction(values['sender'],
+                                       values['recipient'],
+                                       values['amount'])
+    response = {'message': f'Transaction will be added to Block {index}'}
+    return jsonify(response), 201
+
+
+@app.route('/chain', methods=['GET'])
+def full_chain():
+    """
+    Get the full blockchain for this node.
+
+    :param: None
+    :return: None
+    """
+    response = {
+            'chain': blockchain.chain,
+            'length': len(blockchain.chain),
+            }
+    return jsonify(response), 200
 
 
 @app.route('/nodes/register', methods=['POST'])
@@ -318,80 +407,10 @@ def consensus():
     return jsonify(response), 200
 
 
-@app.route('/mine', methods=['GET'])
-def mine():
-    """
-    The Mining Endpoint
-    -------------------
-    This is where the 'magic' happens. The 'magic' can be broken down into
-    three things:
-        1. Calculate the Proof of Work.
-        2. Reward the miner(us) by adding a transaction granting us one coin.
-        3. Forge the new Block by adding it to the chain.
-
-    :param: None
-    :return: None
-    """
-    # We run the Proof of Work algorithm to get the next proof.
-    last_block = blockchain.last_block
-    last_proof = last_block['proof']
-    proof = blockchain.proof_of_work(last_proof)
-    # We must receive a reward for finding the proof.
-    # The sender is "0" to signify that this node has mined a new coin.
-    blockchain.new_transaction(
-            sender="0",
-            recipient=node_identifier,
-            amount=1,
-            )
-    # Forge the new Block by adding it to the chain.
-    previous_hash = blockchain.hash(last_block)
-    block = blockchain.new_block(proof, previous_hash)
-    response = {
-            'message': "New Block Forged.",
-            'index': block['index'],
-            'transactions': block['transactions'],
-            'proof': block['proof'],
-            'previous_hash': block['previous_hash'],
-            }
-    return jsonify(response)
-
-
-@app.route('/transactions/new', methods=['POST'])
-def new_transaction_flask():
-    """
-    Flask endpoint over the network for submitting a new transaction to
-    the blockchain.
-
-    :param: None
-    :return: None
-    """
-    values = request.get_json()
-    # check that the required fields are in the POST'd data
-    required = ['sender', 'recipient', 'amount']
-    if not all(k in values for k in required):
-        return 'Missing values', 400
-    # create a new transaction
-    index = blockchain.new_transaction(values['sender'],
-                                       values['recipient'],
-                                       values['amount'])
-    response = {'message': f'Transaction will be added to Block {index}'}
-    return jsonify(response), 201
-
-
-@app.route('/chain', methods=['GET'])
-def full_chain():
-    """
-    Get the full blockchain for this node.
-
-    :param: None
-    :return: None
-    """
-    response = {
-            'chain': blockchain.chain,
-            'length': len(blockchain.chain),
-            }
-    return jsonify(response), 200
-
-
 if __name__ == '__main__':
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('-p', '--port', default=5000, type=int, help='listen port')
+    args = parser.parse_args()
+    port = args.port
     app.run(host='0.0.0.0', port=5000)
